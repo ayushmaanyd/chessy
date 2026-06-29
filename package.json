@@ -1,0 +1,18 @@
+{
+  "name": "chessy",
+  "version": "1.0.0",
+  "description": "Play chess with a friend by sharing a link. Single Node server, no external services.",
+  "type": "module",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node --watch server.js"
+  },
+  "license": "ISC",
+  "dependencies": {
+    "better-sqlite3": "^12.11.1",
+    "chess.js": "^1.0.0",
+    "express": "^4.19.2",
+    "ws": "^8.18.0"
+  }
+}

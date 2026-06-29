@@ -1,0 +1,126 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Chessy — play chess with a friend</title>
+    <link rel="stylesheet" href="/style.css" />
+    <link
+      rel="icon"
+      href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>♟️</text></svg>"
+    />
+  </head>
+  <body>
+    <header class="topbar">
+      <a class="brand" href="/">♟ Chess<span>y</span></a>
+      <nav class="nav-links">
+        <a href="/history">Match history</a>
+      </nav>
+      <div id="conn" class="conn">offline</div>
+    </header>
+
+    <!-- LANDING / CREATE -->
+    <main id="home" class="home">
+      <div class="home-card">
+        <h1>Play chess with a friend</h1>
+        <p class="sub">Create a game, send the link, and play in real time. No sign-up.</p>
+
+        <label class="field">
+          <span>Your name</span>
+          <input id="home-name" maxlength="24" placeholder="e.g. Magnus" />
+        </label>
+
+        <button id="create-btn" class="btn primary big">Create a game</button>
+
+        <div class="divider"><span>or join with a code</span></div>
+        <form id="join-form" class="join-row">
+          <input id="join-code" maxlength="4" placeholder="CODE" autocomplete="off" />
+          <button class="btn" type="submit">Join</button>
+        </form>
+      </div>
+    </main>
+
+    <!-- MATCH HISTORY -->
+    <main id="history-page" class="history-page hidden">
+      <div class="history-card">
+        <div class="history-head">
+          <h1>Match history</h1>
+          <div id="history-stats" class="muted"></div>
+        </div>
+        <div id="history-list" class="history-list"></div>
+      </div>
+    </main>
+
+    <!-- GAME -->
+    <main id="game" class="game hidden">
+      <section class="board-col">
+        <div class="player-strip" id="player-top">
+          <span class="dot"></span>
+          <span class="pname">Waiting…</span>
+          <span class="ptag"></span>
+        </div>
+
+        <div id="board-wrap" class="board-wrap">
+          <div id="board" class="board"></div>
+          <div id="overlay" class="overlay hidden"></div>
+        </div>
+
+        <div class="player-strip" id="player-bottom">
+          <span class="dot"></span>
+          <span class="pname">You</span>
+          <span class="ptag"></span>
+        </div>
+      </section>
+
+      <aside class="side">
+        <div id="share" class="panel share">
+          <h3>Invite a friend</h3>
+          <p class="muted">Send this link. The first to open it joins you.</p>
+          <div class="share-row">
+            <input id="share-link" readonly />
+            <button id="copy-btn" class="btn">Copy</button>
+          </div>
+          <div class="code-big">Code: <strong id="share-code">····</strong></div>
+        </div>
+
+        <div class="panel status-panel">
+          <div id="turn" class="turn">Connecting…</div>
+          <div class="btn-row">
+            <button id="resign-btn" class="btn danger" disabled>Resign</button>
+            <button id="rematch-btn" class="btn hidden">Rematch</button>
+          </div>
+        </div>
+
+        <div class="panel moves-panel">
+          <h3>Moves</h3>
+          <ol id="moves" class="moves"></ol>
+        </div>
+
+        <div class="panel chat-panel">
+          <h3>Chat</h3>
+          <div id="chat-log" class="chat-log"></div>
+          <form id="chat-form" class="chat-form">
+            <input id="chat-input" maxlength="300" placeholder="Say something…" autocomplete="off" />
+            <button class="btn" type="submit">Send</button>
+          </form>
+        </div>
+      </aside>
+    </main>
+
+    <!-- Game-over modal -->
+    <div id="modal" class="modal hidden">
+      <div class="modal-card">
+        <h2 id="modal-title">Game over</h2>
+        <p id="modal-sub"></p>
+        <div class="btn-row center">
+          <button id="modal-rematch" class="btn primary">Rematch</button>
+          <a href="/" class="btn">New game</a>
+        </div>
+      </div>
+    </div>
+
+    <div id="toast" class="toast hidden"></div>
+
+    <script type="module" src="/app.js"></script>
+  </body>
+</html>
