@@ -49,6 +49,43 @@ function initHome() {
     if (/^[A-Z0-9]{4}$/.test(code)) location.href = "/" + code;
     else toast("Enter a 4-character code");
   });
+
+  // Quick match — connects to the matchmaking queue over WebSocket.
+  let queueWs = null;
+  $("quickmatch-btn").addEventListener("click", () => {
+    if (queueWs) {
+      queueWs.close();
+      queueWs = null;
+      $("quickmatch-btn").textContent = "Quick match ";
+      $("qm-status").textContent = "";
+      return;
+    }
+    saveName(nameInput.value);
+    const proto = location.protocol === "https:" ? "wss" : "ws";
+    const url = `${proto}://${location.host}/ws?mode=queue&session=${encodeURIComponent(session)}&name=${encodeURIComponent(myName)}`;
+    queueWs = new WebSocket(url);
+
+    queueWs.onopen = () => {
+      $("quickmatch-btn").textContent = "Cancel search ";
+      $("qm-status").textContent = "🔍";
+    };
+    queueWs.onmessage = (ev) => {
+      const msg = JSON.parse(ev.data);
+      if (msg.t === "queued") {
+        $("qm-status").textContent = `#${msg.position} in queue`;
+      } else if (msg.t === "joined") {
+        // Match found — server redirects us to the game room.
+        location.href = "/" + msg.code;
+      }
+    };
+    queueWs.onclose = () => {
+      if (queueWs) {
+        $("quickmatch-btn").textContent = "Quick match ";
+        $("qm-status").textContent = "";
+        queueWs = null;
+      }
+    };
+  });
 }
 
 function saveName(v) {

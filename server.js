@@ -4,10 +4,35 @@ import { Chess } from "chess.js";
 import { createServer } from "node:http";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
-import { saveCompletedGame, listRecentGames, getOverallStats, getPlayerStats } from "./db.js";
+import { saveCompletedGame, listRecentGames, getOverallStats, getPlayerStats, getLeaderboard, db } from "./db.js";
+import { EnginePool } from "./engine/index.js";
+import { MatchmakingQueue } from "./matchmaking/Queue.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const PORT = process.env.PORT || 8080;
+
+// Worker thread pool for OOP engine pre-validation (CPU-bound, off main thread).
+const enginePool = new EnginePool();
+
+// Matchmaking queue — pairs players who click "Quick match".
+const queue = new MatchmakingQueue();
+queue.on("match", (a, b) => {
+  const code = makeCode();
+  const game = createGame(code);
+  // Randomly assign colors.
+  const [white, black] = Math.random() < 0.5 ? [a, b] : [b, a];
+  game.players.w = { session: white.session, name: white.name, ws: white.ws };
+  game.players.b = { session: black.session, name: black.name, ws: black.ws };
+  white.ws._role = "w";
+  black.ws._role = "b";
+  white.ws._game = game;
+  black.ws._game = game;
+  white.ws._session = white.session;
+  black.ws._session = black.session;
+  white.ws.send(JSON.stringify({ t: "joined", code, you: "w" }));
+  black.ws.send(JSON.stringify({ t: "joined", code, you: "b" }));
+  broadcastState(game);
+});
 
 const app = express();
 
@@ -33,6 +58,35 @@ const wss = new WebSocketServer({ server, path: "/ws" });
  */
 const games = new Map();
 
+// ── Networks: per-IP rate limiter ─────────────────────────────────────────────
+// Limits WebSocket connections to 20 per IP per minute.
+const rateLimits = new Map(); // ip → { count, resetAt }
+
+function isRateLimited(ip) {
+  const now = Date.now();
+  let entry = rateLimits.get(ip);
+  if (!entry || now > entry.resetAt) {
+    entry = { count: 0, resetAt: now + 60_000 };
+    rateLimits.set(ip, entry);
+  }
+  entry.count++;
+  return entry.count > 20;
+}
+
+// ── Networks: WebSocket heartbeat ─────────────────────────────────────────────
+// Pings all clients every 30 s. Clients that don't pong within that window
+// are terminated (stale TCP connections that didn't fire a close event).
+const heartbeatInterval = setInterval(() => {
+  wss.clients.forEach((ws) => {
+    if (!ws.isAlive) {
+      ws.terminate();
+      return;
+    }
+    ws.isAlive = false;
+    ws.ping();
+  });
+}, 30_000);
+
 const CODE_CHARS = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"; // no easily-confused chars
 function makeCode() {
   let code;
@@ -57,6 +111,7 @@ function createGame(code) {
     createdAt: Date.now(),
     reapTimer: null,
     persisted: false, // true once this game's outcome has been written to SQLite
+    fens: [],         // FEN snapshot after every move (for match_moves table)
   };
   games.set(code, game);
   return game;
@@ -138,6 +193,7 @@ function persistIfDone(game) {
     winner: status.winner,
     reason: status.reason,
     moves: game.chess.history(),
+    fens: game.fens,
     startedAt: game.createdAt,
   });
 }
@@ -151,10 +207,32 @@ function scheduleReap(game) {
 }
 
 wss.on("connection", (ws, req) => {
+  // Networks: heartbeat tracking — mark alive; reset on every pong.
+  ws.isAlive = true;
+  ws.on("pong", () => { ws.isAlive = true; });
+
+  // Networks: rate limiting — drop abusive IPs before any game logic runs.
+  const ip = req.socket.remoteAddress ?? "unknown";
+  if (isRateLimited(ip)) {
+    ws.close(1008, "Rate limit exceeded");
+    return;
+  }
+
   const url = new URL(req.url, "http://localhost");
-  const code = (url.searchParams.get("code") || "").toUpperCase();
+  const mode = url.searchParams.get("mode") || "";
   const session = url.searchParams.get("session") || "";
   const name = (url.searchParams.get("name") || "Anonymous").slice(0, 24);
+
+  // Matchmaking path — player is queued until a match is found.
+  if (mode === "queue") {
+    if (!session) { ws.close(); return; }
+    ws._role = "queued";
+    queue.enqueue(ws, name, session);
+    ws.on("close", () => queue.dequeue(session));
+    return;
+  }
+
+  const code = (url.searchParams.get("code") || "").toUpperCase();
 
   if (!code || !session) {
     send(ws, { t: "error", message: "Missing game code or session." });
@@ -207,7 +285,10 @@ wss.on("connection", (ws, req) => {
     } catch {
       return;
     }
-    handleMessage(ws, game, msg);
+    // handleMessage is async (uses engine worker thread for move pre-validation).
+    handleMessage(ws, game, msg).catch((err) =>
+      console.error("[ws] handleMessage error:", err)
+    );
   });
 
   ws.on("close", () => {
@@ -219,7 +300,7 @@ wss.on("connection", (ws, req) => {
   });
 });
 
-function handleMessage(ws, game, msg) {
+async function handleMessage(ws, game, msg) {
   const role = ws._role;
 
   switch (msg.t) {
@@ -227,6 +308,15 @@ function handleMessage(ws, game, msg) {
       if (role !== "w" && role !== "b") return; // spectators can't move
       if (game.result) return; // game already decided
       if (game.chess.turn() !== role) return; // not your turn
+
+      // OOP engine pre-validation runs in a Worker thread (non-blocking).
+      // This is a fast geometric check; chess.js remains the final authority.
+      const geometryOk = await enginePool.validate(game.chess.fen(), msg.from, msg.to);
+      if (!geometryOk) {
+        send(ws, { t: "state", ...snapshot(game), you: role });
+        return;
+      }
+
       let move;
       try {
         move = game.chess.move({
@@ -238,10 +328,11 @@ function handleMessage(ws, game, msg) {
         move = null;
       }
       if (!move) {
-        // Illegal — resync this client to the authoritative state.
+        // Illegal by chess.js rules (e.g. leaves king in check) — resync client.
         send(ws, { t: "state", ...snapshot(game), you: role });
         return;
       }
+      game.fens.push(game.chess.fen());
       broadcastState(game);
       persistIfDone(game);
       break;
@@ -268,6 +359,7 @@ function handleMessage(ws, game, msg) {
         game.rematch_b = false;
         game.createdAt = Date.now();
         game.persisted = false;
+        game.fens = [];
         const w = game.players.w;
         const b = game.players.b;
         game.players.w = b;
@@ -312,13 +404,39 @@ app.get("/api/history", (_req, res) => {
   res.json({ games: listRecentGames(25), stats: getOverallStats() });
 });
 
-// Per-player win/loss stats.
+// Per-player win/loss/Elo stats.
 app.get("/api/stats", (req, res) => {
   const name = String(req.query.name || "").trim().slice(0, 24);
-  if (!name) return res.json({ games: 0, wins: 0, losses: 0, draws: 0 });
+  if (!name) return res.json({ games: 0, wins: 0, losses: 0, draws: 0, elo: 1200 });
   res.json(getPlayerStats(name));
+});
+
+// Leaderboard — top players by Elo.
+app.get("/api/leaderboard", (_req, res) => {
+  res.json({ players: getLeaderboard(10) });
 });
 
 server.listen(PORT, () => {
   console.log(`\n  ♟  Chessy running:  http://localhost:${PORT}\n`);
 });
+
+// ── OS: Graceful shutdown ─────────────────────────────────────────────────────
+// SIGTERM is sent by Docker/systemd/Heroku on stop. SIGINT is Ctrl-C.
+// We stop accepting new connections, notify all WebSocket clients, flush the
+// SQLite WAL to disk, and exit cleanly instead of being force-killed.
+function gracefulShutdown(signal) {
+  console.log(`\n  [${signal}] Graceful shutdown — draining ${wss.clients.size} connections…`);
+  clearInterval(heartbeatInterval);
+  enginePool.terminate();
+  wss.clients.forEach((ws) => ws.close(1001, "Server shutting down"));
+  server.close(() => {
+    db.close();
+    console.log("  Shutdown complete.");
+    process.exit(0);
+  });
+  // Force-exit after 5 s if connections don't close cleanly.
+  setTimeout(() => process.exit(1), 5_000).unref();
+}
+
+process.on("SIGTERM", () => gracefulShutdown("SIGTERM"));
+process.on("SIGINT",  () => gracefulShutdown("SIGINT"));
