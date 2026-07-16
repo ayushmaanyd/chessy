@@ -322,6 +322,9 @@ input:focus {
   cursor: grabbing;
   width: var(--sqsize);
   height: var(--sqsize);
+  background-size: contain;
+  background-repeat: no-repeat;
+  background-position: center;
 }
 .sq.sel::after {
   content: "";
@@ -562,6 +565,35 @@ input:focus {
   color: var(--muted);
   line-height: 1.6;
 }
+
+/* Player personal stats card */
+.player-stats {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  background: var(--panel-2);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 14px 16px;
+  margin-bottom: 20px;
+  flex-wrap: wrap;
+}
+.ps-name {
+  font-weight: 700;
+  font-size: 15px;
+  flex: 1;
+  min-width: 80px;
+}
+.ps-stat {
+  font-weight: 700;
+  font-size: 13px;
+  padding: 4px 10px;
+  border-radius: 6px;
+}
+.ps-stat.win  { color: var(--green); background: rgba(95,191,115,0.12); }
+.ps-stat.loss { color: #ff7a66; background: rgba(224,83,61,0.12); }
+.ps-stat.draw { color: var(--muted); background: rgba(255,255,255,0.06); }
+.ps-total { font-size: 13px; color: var(--muted); }
 
 @media (max-width: 860px) {
   .game {

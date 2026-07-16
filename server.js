@@ -4,7 +4,7 @@ import { Chess } from "chess.js";
 import { createServer } from "node:http";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
-import { saveCompletedGame, listRecentGames, getOverallStats } from "./db.js";
+import { saveCompletedGame, listRecentGames, getOverallStats, getPlayerStats } from "./db.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const PORT = process.env.PORT || 8080;
@@ -310,6 +310,13 @@ app.get("/api/new", (_req, res) => {
 // Match history, read from SQLite — populated as games finish (see persistIfDone).
 app.get("/api/history", (_req, res) => {
   res.json({ games: listRecentGames(25), stats: getOverallStats() });
+});
+
+// Per-player win/loss stats.
+app.get("/api/stats", (req, res) => {
+  const name = String(req.query.name || "").trim().slice(0, 24);
+  if (!name) return res.json({ games: 0, wins: 0, losses: 0, draws: 0 });
+  res.json(getPlayerStats(name));
 });
 
 server.listen(PORT, () => {

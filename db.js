@@ -51,12 +51,27 @@ export function listRecentGames(limit = 25) {
 const statsStmt = db.prepare(`
   SELECT
     COUNT(*) AS totalGames,
-    SUM(CASE WHEN winner = 'd' THEN 1 ELSE 0 END) AS draws
+    COALESCE(SUM(CASE WHEN winner = 'd' THEN 1 ELSE 0 END), 0) AS draws
   FROM games
 `);
 
 export function getOverallStats() {
   return statsStmt.get();
+}
+
+const playerStatsStmt = db.prepare(`
+  SELECT
+    COUNT(*) AS games,
+    COALESCE(SUM(CASE WHEN (winner='w' AND white_name=?) OR (winner='b' AND black_name=?) THEN 1 ELSE 0 END), 0) AS wins,
+    COALESCE(SUM(CASE WHEN (winner='b' AND white_name=?) OR (winner='w' AND black_name=?) THEN 1 ELSE 0 END), 0) AS losses,
+    COALESCE(SUM(CASE WHEN winner='d' AND (white_name=? OR black_name=?) THEN 1 ELSE 0 END), 0) AS draws
+  FROM games
+  WHERE white_name=? OR black_name=?
+`);
+
+export function getPlayerStats(name) {
+  return playerStatsStmt.get(name, name, name, name, name, name, name, name)
+    ?? { games: 0, wins: 0, losses: 0, draws: 0 };
 }
 
 function rowToGame(row) {

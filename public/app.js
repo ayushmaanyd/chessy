@@ -76,6 +76,26 @@ async function initHistory() {
   const { games, stats } = data;
   statsEl.textContent = `${stats.totalGames} game${stats.totalGames === 1 ? "" : "s"} played · ${stats.draws} draw${stats.draws === 1 ? "" : "s"}`;
 
+  // Personal stats card
+  if (myName && myName !== "Anonymous") {
+    try {
+      const res = await fetch(`/api/stats?name=${encodeURIComponent(myName)}`);
+      const ps = await res.json();
+      if (ps.games > 0) {
+        const card = document.createElement("div");
+        card.className = "player-stats";
+        card.innerHTML = `
+          <span class="ps-name">${escapeHtml(myName)}</span>
+          <span class="ps-stat win">${ps.wins}W</span>
+          <span class="ps-stat loss">${ps.losses}L</span>
+          <span class="ps-stat draw">${ps.draws}D</span>
+          <span class="ps-total">${ps.games} game${ps.games === 1 ? "" : "s"}</span>
+        `;
+        listEl.before(card);
+      }
+    } catch { /* non-fatal */ }
+  }
+
   if (games.length === 0) {
     listEl.innerHTML = `<p class="muted">No completed games yet — finish a game and it'll show up here.</p>`;
     return;
